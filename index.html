@@ -103,9 +103,80 @@ var KINDS={sub:['Subscription','Auto-renewal','Mark renewed'],pay:['Payment','Pa
 var FREQ=[[1,'Monthly'],[2,'Every 2 months'],[3,'Quarterly'],[6,'Every 6 months'],[12,'Yearly']];
 var CUR={lei:'lei',EUR:'€',USD:'$'};
 
-var S={items:[],theme:'auto',rates:{EUR:5,USD:4.6},alerts:[7,1,0],hour:9};
+var S={items:[],theme:'auto',rates:{EUR:5,USD:4.6},alerts:[7,3,2,1,0],hour:9,push:{}};
 try{var r0=localStorage.getItem('recurring');if(r0)S=Object.assign(S,JSON.parse(r0))}catch(e){}
-function save(){try{localStorage.setItem('recurring',JSON.stringify(S))}catch(e){}}
+if(!S.push)S.push={};if(String(S.alerts)==='7,1,0')S.alerts=[7,3,2,1,0];
+function saveRaw(){try{localStorage.setItem('recurring',JSON.stringify(S))}catch(e){}}
+function save(){saveRaw();if(S.push.on)queueSync()}
+
+/* ---------- push notifications via GitHub Actions ---------- */
+var REPO=(function(){var p=location.pathname.split('/')[1];return /\.github\.io$/.test(location.hostname)&&p?location.hostname.split('.')[0]+'/'+p:'razvntv-crypto/recurring'})();
+function b64u(buf){var b=new Uint8Array(buf),s='';for(var i=0;i<b.length;i++)s+=String.fromCharCode(b[i]);return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
+function ub64(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';var r=atob(s),a=new Uint8Array(r.length);for(var i=0;i<r.length;i++)a[i]=r.charCodeAt(i);return a}
+function hsh(t){var h=5381;for(var i=0;i<t.length;i++)h=(h*33^t.charCodeAt(i))>>>0;return h.toString(36)}
+function pushKey(){if(!S.push.key){S.push.key=b64u(crypto.getRandomValues(new Uint8Array(32)));saveRaw()}return S.push.key}
+function standalone(){return(window.navigator.standalone===true)||(window.matchMedia&&matchMedia('(display-mode: standalone)').matches)}
+function gh(path,opt){opt=opt||{};opt.headers={'Authorization':'Bearer '+S.push.token,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'};return fetch('https://api.github.com/repos/'+REPO+path,opt)}
+function ghErr(st){return st===401?'GitHub token is invalid or expired. Paste a new one.':(st===403||st===404)?'The token has no access to the '+REPO.split('/')[1]+' repo. Check its permissions.':'GitHub error '+st+'. Try again.'}
+var syncT=null,syncing=false;
+function queueSync(){clearTimeout(syncT);syncT=setTimeout(function(){doSync(false)},1200)}
+async function curSub(){if(!('serviceWorker' in navigator))return null;var reg=await Promise.race([navigator.serviceWorker.ready,new Promise(function(r){setTimeout(r,4000)})]);if(!reg||!reg.pushManager)return null;var sub=await reg.pushManager.getSubscription();return sub?sub.toJSON():null}
+async function doSync(force){
+ if(!S.push.token){S.push.err='Paste your GitHub token first.';saveRaw();if(view==='set')render();return false}
+ if(syncing){queueSync();return false}syncing=true;
+ try{
+  var sub=S.push.on?await curSub():null;
+  var cfg={v:1,tz:'Europe/Bucharest',hour:S.hour,alerts:S.alerts,vapid:S.push.on?S.push.vapid:null,sub:sub,
+   items:S.items.map(function(i){return{n:i.n,k:i.k,amt:i.amt,cur:i.cur,m:i.m,d:i.d,paused:!!i.paused}})};
+  var plain=JSON.stringify(cfg),h=hsh(plain);
+  if(!force&&h===S.push.h&&!S.push.err){syncing=false;return true}
+  var key=await crypto.subtle.importKey('raw',ub64(pushKey()),'AES-GCM',false,['encrypt']);
+  var iv=crypto.getRandomValues(new Uint8Array(12));
+  var ct=await crypto.subtle.encrypt({name:'AES-GCM',iv:iv},key,new TextEncoder().encode(plain));
+  var box=JSON.stringify({v:1,iv:b64u(iv),ct:b64u(ct)});
+  for(var attempt=0;attempt<2;attempt++){
+   var g=await gh('/contents/schedule.enc'),sha=null;
+   if(g.ok)sha=(await g.json()).sha;else if(g.status!==404)throw g.status;
+   var body={message:'Update schedule',content:btoa(box)};if(sha)body.sha=sha;
+   var p=await gh('/contents/schedule.enc',{method:'PUT',body:JSON.stringify(body)});
+   if(p.ok){S.push.h=h;S.push.err='';S.push.synced=Date.now();saveRaw();syncing=false;if(view==='set')render();return true}
+   if(p.status!==409&&p.status!==422)throw p.status}
+  throw 409;
+ }catch(e){S.push.err=typeof e==='number'?ghErr(e):'Could not reach GitHub. It will retry on the next change.';saveRaw();syncing=false;if(view==='set')render();return false}}
+async function pushOn(){
+ if(!standalone()){toast('Open Recurring from the Home Screen icon first');return}
+ if(!('serviceWorker' in navigator)||!('PushManager' in window)||!('Notification' in window)){toast('This browser does not support notifications');return}
+ if(!S.push.token){toast('Paste the GitHub token first');return}
+ var perm=await Notification.requestPermission();if(perm!=='granted'){toast('Notifications were not allowed');render();return}
+ try{
+  if(!S.push.vapid){var kp=await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
+   var raw=await crypto.subtle.exportKey('raw',kp.publicKey),jwk=await crypto.subtle.exportKey('jwk',kp.privateKey);S.push.vapid={pub:b64u(raw),priv:jwk.d};saveRaw()}
+  var reg=await navigator.serviceWorker.ready,old=await reg.pushManager.getSubscription();if(old)await old.unsubscribe();
+  await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:ub64(S.push.vapid.pub)});
+  S.push.on=true;saveRaw();var ok=await doSync(true);render();toast(ok?'Notifications are on':'Turned on, but sync failed');
+ }catch(e){toast('Could not turn on notifications');render()}}
+async function pushOff(){try{var reg=await navigator.serviceWorker.ready,sub=await reg.pushManager.getSubscription();if(sub)await sub.unsubscribe()}catch(e){}S.push.on=false;saveRaw();await doSync(true);render();toast('Notifications are off')}
+async function pushTest(){var ok=await doSync(true);if(!ok){toast('Sync failed, see Settings');return}
+ var r=await gh('/actions/workflows/notify.yml/dispatches',{method:'POST',body:JSON.stringify({ref:'main',inputs:{test:true}})});
+ toast(r.status===204?'Test sent, arrives in about a minute':r.status===403||r.status===404?'Token needs Actions: Read and write for the test':'Could not start the test ('+r.status+')')}
+function timeAgo(t){var m=Math.round((Date.now()-t)/6e4);return m<1?'just now':m<60?m+' min ago':new Date(t).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}
+function viewPush(){
+ var P_=S.push,h='<div class="lab">Notifications</div>';
+ if(P_.on){
+  h+='<div class="card" style="padding:14px 16px"><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-weight:600">On</b><span class="note" style="margin:0">'+(P_.err?'<span style="color:var(--bad)">Not synced</span>':P_.synced?'Synced '+timeAgo(P_.synced):'')+'</span></div>'
+   +(P_.err?'<div class="note" style="color:var(--bad)">'+esc(P_.err)+'</div>':'<div class="note">One notification at '+pad(S.hour)+':00 on days when something is '+S.alerts.slice().sort(function(a,b){return b-a}).map(function(x){return x===0?'due':x===1?'1 day':x+' days'}).join(', ').replace(/, ([^,]*)$/,' or $1')+' away, plus up to 3 days after a missed payment, action or expiry.</div>')
+   +'<div class="chips" style="margin-top:10px"><button class="b" data-a="ptest">Send test</button><button class="b" data-a="psync">Sync now</button><button class="b" data-a="poff">Turn off</button></div></div>'
+   +'<div class="lab">GitHub token</div><input id="tk" type="password" autocomplete="off" placeholder="github_pat_…" value="'+esc(P_.token||'')+'">';
+  return h}
+ h+='<div class="card" style="padding:14px 16px"><div class="note" style="margin-top:0;color:var(--ink);font-size:13.5px">Push notifications on the days something is due, even when the app is closed. One-time setup:</div>'
+ +'<div class="note"><b>1.</b> Copy this key and add it on GitHub: <b>'+REPO.split('/')[1]+'</b> repo → Settings → Secrets and variables → Actions → New repository secret. Name: <b>RECURRING_KEY</b>.</div>'
+ +'<div class="chips"><button class="b" data-a="pkey" style="flex:1">Copy key</button><a class="b" style="flex:1;display:grid;place-items:center;text-decoration:none" href="https://github.com/'+REPO+'/settings/secrets/actions/new" target="_blank" rel="noopener">Open GitHub secrets</a></div>'
+ +'<div class="note" style="margin-top:14px"><b>2.</b> Create a token: GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token. Repository access: only <b>'+REPO.split('/')[1]+'</b>. Permissions: <b>Contents</b> and <b>Actions</b> → Read and write. Paste it here:</div><a class="b" style="display:grid;place-items:center;text-decoration:none;margin-bottom:8px" href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Open token page</a>'
+ +'<input id="tk" type="password" autocomplete="off" placeholder="github_pat_…" value="'+esc(P_.token||'')+'">'
+ +'<div class="note" style="margin-top:14px"><b>3.</b> Turn on and allow notifications.'+(standalone()?'':' <span style="color:var(--bad)">Open Recurring from its Home Screen icon for this step.</span>')+'</div>'
+ +'<button class="go" data-a="pon" style="margin-top:6px">Turn on notifications</button>'
+ +(P_.err?'<div class="note" style="color:var(--bad)">'+esc(P_.err)+'</div>':'')+'</div>';
+ return h}
 var filt='',exp=null,arm=null,ed=null,view='home',tT;
 
 /* dates */
@@ -172,10 +243,11 @@ function viewHome(){
 function viewSet(){
  var h='<div class="head"><button class="ib" data-a="back" style="margin-left:-8px">'+ico('back')+'</button><h1 style="align-self:center">Settings</h1><span style="width:40px"></span></div>';
  h+='<div class="lab">Appearance</div><div class="chips">'+[['auto','Auto'],['light','Light'],['dark','Dark']].map(function(t){return'<button class="c'+(S.theme===t[0]?' on':'')+'" data-theme="'+t[0]+'">'+t[1]+'</button>'}).join('')+'</div>';
- h+='<div class="lab">Calendar alerts (days before)</div><div class="chips">'+[0,1,2,3,7,14,30].map(function(n){return'<button class="c'+(S.alerts.indexOf(n)>-1?' on':'')+'" data-al="'+n+'">'+(n===0?'Same day':n+(n===1?' day':' days'))+'</button>'}).join('')+'</div>';
- h+='<div class="lab">Alert time</div><div class="chips">'+[8,9,10,12,18].map(function(n){return'<button class="c'+(S.hour===n?' on':'')+'" data-hr="'+n+'">'+pad(n)+':00</button>'}).join('')+'</div><div class="note">Alerts are part of the calendar events. Changes apply the next time you add events to Calendar.</div>';
+ h+=viewPush();
+ h+='<div class="lab">Alert days (before the date)</div><div class="chips">'+[0,1,2,3,7,14,30].map(function(n){return'<button class="c'+(S.alerts.indexOf(n)>-1?' on':'')+'" data-al="'+n+'">'+(n===0?'Same day':n+(n===1?' day':' days'))+'</button>'}).join('')+'</div>';
+ h+='<div class="lab">Alert time</div><div class="chips">'+[8,9,10,12,18].map(function(n){return'<button class="c'+(S.hour===n?' on':'')+'" data-hr="'+n+'">'+pad(n)+':00</button>'}).join('')+'</div><div class="note">Used by notifications and by Calendar events. For Calendar, changes apply the next time you add the events.</div>';
  h+='<div class="lab">Conversion to lei (for the monthly total)</div><div class="two" style="grid-template-columns:1fr 1fr"><div><div class="note" style="margin:0 0 4px">1 EUR =</div><input data-rate="EUR" inputmode="decimal" value="'+S.rates.EUR+'"></div><div><div class="note" style="margin:0 0 4px">1 USD =</div><input data-rate="USD" inputmode="decimal" value="'+S.rates.USD+'"></div></div>';
- h+='<div class="lab">Backup</div><div class="chips" style="margin-bottom:8px"><button class="b" data-a="bexp">Export text</button><button class="b" data-a="bcp">Copy</button><button class="b" data-a="bimp">Import</button></div><textarea id="bk" placeholder="Export shows your data here. To restore, paste a backup and tap Import."></textarea><div class="note">Everything stays on this phone.</div>';
+ h+='<div class="lab">Backup</div><div class="chips" style="margin-bottom:8px"><button class="b" data-a="bexp">Export text</button><button class="b" data-a="bcp">Copy</button><button class="b" data-a="bimp">Import</button></div><textarea id="bk" placeholder="Export shows your data here. To restore, paste a backup and tap Import."></textarea><div class="note">Your data stays on this phone. With notifications on, an encrypted copy is kept in your GitHub repo so the reminders can be sent; only this phone and the RECURRING_KEY secret can read it.</div>';
  return h}
 
 function render(){
@@ -211,7 +283,7 @@ function newEd(){return{id:null,n:'',k:'sub',amt:'',cur:'lei',m:1,d:today(),ic:'
 /* events */
 document.addEventListener('input',function(e){var t=e.target;
  if(t.id==='en')ed.n=t.value;if(t.id==='ea')ed.amt=t.value;if(t.id==='ed')ed.d=t.value;if(t.id==='eo')ed.note=t.value});
-document.addEventListener('change',function(e){var t=e.target;if(t.dataset.rate){var v=num(t.value);if(v>0){S.rates[t.dataset.rate]=v;save()}}});
+document.addEventListener('change',function(e){var t=e.target;if(t.id==='tk'){S.push.token=t.value.trim();S.push.err='';saveRaw();if(S.push.on)doSync(true);return}if(t.dataset.rate){var v=num(t.value);if(v>0){S.rates[t.dataset.rate]=v;save()}}});
 function find(id){return S.items.filter(function(i){return i.id===id})[0]}
 document.addEventListener('click',function(e){
  var t=e.target.closest('button');
@@ -224,6 +296,11 @@ document.addEventListener('click',function(e){
  if(D.theme){S.theme=D.theme;save();applyTheme();render();return}
  if(D.al!==undefined){var n=+D.al,ix=S.alerts.indexOf(n);if(ix>-1){if(S.alerts.length>1)S.alerts.splice(ix,1)}else S.alerts.push(n);save();render();return}
  if(D.hr){S.hour=+D.hr;save();render();return}
+ if(D.a==='pkey'){var k=pushKey();try{navigator.clipboard.writeText(k).then(function(){toast('Key copied')},function(){prompt('Copy this key',k)})}catch(x){prompt('Copy this key',k)}return}
+ if(D.a==='pon'){pushOn();return}
+ if(D.a==='poff'){pushOff();return}
+ if(D.a==='psync'){doSync(true).then(function(ok){toast(ok?'Synced':'Sync failed')});return}
+ if(D.a==='ptest'){pushTest();return}
  if(D.done){var it=find(D.done);if(it){it.last=today();it.d=addM(it.d,it.m,it.dom);exp=null;save();render();toast('Next: '+dshort(it.d))}return}
  if(D.pause){var p=find(D.pause);if(p){p.paused=!p.paused;exp=null;save();render()}return}
  if(D.del){if(arm===D.del){S.items=S.items.filter(function(i){return i.id!==D.del});arm=null;exp=null;save();toast('Deleted. Remove it from Calendar if you added it.')}else arm=D.del;render();return}
@@ -255,7 +332,8 @@ document.addEventListener('click',function(e){if(e.target.closest&&e.target.clos
 ['gesturestart','gesturechange','gestureend'].forEach(function(n){document.addEventListener(n,function(e){e.preventDefault()},{passive:false})});
 document.addEventListener('touchmove',function(e){if(e.touches&&e.touches.length>1)e.preventDefault()},{passive:false});
 if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).catch(function(){})})}
-window.__R={S:function(){return S},ics:ics};
+window.__R={S:function(){return S},ics:ics,sync:doSync};
+if(S.push.on)queueSync();
 applyTheme();render();fx(document.getElementById('app'));
 })();
 </script>

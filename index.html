@@ -6,9 +6,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Recurring</title>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png?v=1">
-<link rel="apple-touch-icon-precomposed" sizes="180x180" href="apple-touch-icon.png?v=1">
-<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png?v=1">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png?v=2">
+<link rel="apple-touch-icon-precomposed" sizes="180x180" href="apple-touch-icon.png?v=2">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png?v=2">
 <meta name="apple-mobile-web-app-title" content="Recurring">
 <meta name="theme-color" content="#000000">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -43,7 +43,7 @@ svg.i{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.6;stro
 .row .t{flex:1;min-width:0}.row .t b{display:block;font-size:15.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row .t small{display:block;font-size:12px;color:var(--mute);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row .w{text-align:right;font-size:12.5px;white-space:nowrap}.row .w small{display:block;color:var(--mute);font-size:11px;margin-top:2px}
-.w.soon{color:var(--warn);font-weight:600}.w.late{color:var(--bad);font-weight:600}
+.w.soon{color:#ff9f1a;font-weight:600}.w.late{color:var(--bad);font-weight:600}
 .acts{display:flex;gap:8px;flex-wrap:wrap;padding:0 0 14px 54px}
 .b{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:10px;height:34px;padding:0 14px;font-size:13px;font-weight:500}
 .b.p{background:var(--btn);color:var(--btnink);border-color:var(--btn)}.b.arm{background:var(--bad);border-color:var(--bad);color:#fff}
@@ -117,7 +117,7 @@ function diff(s){return Math.round((pd(s)-pd(today()))/864e5)}
 function dim(y,m){return new Date(y,m+1,0).getDate()}
 function addM(s,n,dom){var d=pd(s),t=d.getMonth()+n,y=d.getFullYear()+Math.floor(t/12),m=((t%12)+12)%12;return fmt(new Date(y,m,Math.min(dom||d.getDate(),dim(y,m))))}
 function dshort(s){return pd(s).toLocaleDateString('en-GB',{day:'numeric',month:'short'})}
-function inTxt(n){return n<0?(-n===1?'1 day overdue':-n+' days overdue'):n===0?'Today':n===1?'Tomorrow':'In '+n+' days'}
+function inTxt(n){return n<0?(-n===1?'1 day overdue':-n+' days overdue'):n===0?'Due today':n===1?'Tomorrow':'In '+n+' days'}
 function fqName(m){var f=FREQ.filter(function(x){return x[0]===m})[0];return f?f[1]:'Every '+m+' months'}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5)}
@@ -160,7 +160,7 @@ function viewHome(){
  var list=act.filter(function(i){return!filt||i.k===filt});
  h+='<div>';
  if(!list.length)h+='<div class="empty">'+(S.items.length?'Nothing here.':'Nothing tracked yet.<br>Tap Add to create your first subscription, bill or deadline.')+'</div>';
- list.forEach(function(i){var n=diff(i.d),open=exp===i.id,cls=n<0?'late':n<=7?'soon':'';
+ list.forEach(function(i){var n=diff(i.d),open=exp===i.id,cls=n<=3?'late':n<=7?'soon':'';
   h+='<div class="ev" data-xr="'+i.id+'"><div class="row"><span class="ic">'+ico(i.ic)+'</span><div class="t"><b>'+esc(i.n)+'</b><small>'+fqName(i.m)+' · '+KINDS[i.k][1]+(i.amt>0?' · '+money(i.amt,i.cur):'')+'</small></div><div class="w '+cls+'">'+inTxt(n)+'<small>'+dshort(i.d)+'</small></div></div>';
   if(open){h+='<div class="acts"><button class="b p" data-done="'+i.id+'">'+KINDS[i.k][2]+'</button><button class="b" data-ee="'+i.id+'">Edit</button><button class="b" data-pause="'+i.id+'">Pause</button><button class="b'+(arm===i.id?' arm':'')+'" data-del="'+i.id+'">'+(arm===i.id?'Sure?':'Delete')+'</button></div>'+(i.note?'<div class="note" style="padding-left:54px;margin-top:-4px">'+esc(i.note)+'</div>':'')+(i.last?'<div class="note" style="padding-left:54px;margin-top:-6px">Last done '+dshort(i.last)+'</div>':'')}
   h+='</div>'});

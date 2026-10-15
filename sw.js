@@ -1,6 +1,6 @@
 /* Recurring service worker: network-first, so new versions reach the phone right away.
    Falls back to the cached copy when offline. */
-const CACHE = "recurring-v3";
+const CACHE = "recurring-v4";
 const CORE = ["./", "index.html", "manifest.webmanifest", "icon-512.png", "apple-touch-icon.png"];
 
 self.addEventListener("install", e => {

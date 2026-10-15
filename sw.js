@@ -25,7 +25,7 @@ self.addEventListener("fetch", e => {
 self.addEventListener("push", e => {
   let p = {};
   try { p = e.data ? e.data.json() : {}; } catch (err) {}
-  e.waitUntil(self.registration.showNotification(p.title || "Recurring", { body: p.body || "Something is coming up.", tag: p.tag || "recurring", icon: "icon-512.png", badge: "favicon-32.png", data: { url: "./" } }));
+  e.waitUntil(self.registration.showNotification(p.title || "Coming up", { body: p.body || "Something is coming up.", tag: p.tag || "recurring", icon: "icon-512.png", badge: "favicon-32.png", data: { url: "./" } }));
 });
 self.addEventListener("notificationclick", e => {
   e.notification.close();

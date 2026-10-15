@@ -50,7 +50,7 @@ const due = (cfg.items || [])
 let payload;
 if (test) {
   const next = (cfg.items || []).filter(it => !it.paused && it.d && diff(it.d) >= 0).sort((a, b) => a.d < b.d ? -1 : 1)[0];
-  payload = { title: "Recurring", body: "Notifications work. " + (next ? "Next: " + line(next, diff(next.d)) + "." : "Nothing coming up yet."), tag: "recurring-test" };
+  payload = { title: "You're all set ✓", body: next ? "Next up: " + line(next, diff(next.d)) + " (" + fmtDate(next.d) + ")" : "Nothing coming up yet.", tag: "recurring-test" };
 } else {
   if (hour < cfg.hour) { console.log("Not alert time yet."); process.exit(0); }
   if (last === today) { console.log("Already sent today."); process.exit(0); }
